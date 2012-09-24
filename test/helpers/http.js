@@ -13,7 +13,7 @@ var assert = require('assert'),
     async = require('async'),
     helpers = require('./index'),
     protocols = helpers.protocols,
-    httpProxy = require('../../lib/node-http-proxy');
+    httpProxy = require('../../');
 
 //
 // ### function createServerPair (options, callback)

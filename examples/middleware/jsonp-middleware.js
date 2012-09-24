@@ -24,7 +24,7 @@ var Store = require('../helpers/store')
 
 http.createServer(new Store().handler()).listen(7531)
 
-require('../../lib/node-http-proxy').createServer(
+require('../../').createServer(
   require('connect-jsonp')(true),
   'localhost', 7531
 ).listen(1337)

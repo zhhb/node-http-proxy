@@ -27,7 +27,7 @@
 var util = require('util'),
     http = require('http'),
     colors = require('colors'),
-    httpProxy = require('../../lib/node-http-proxy');
+    httpProxy = require('../../');
 
 try {
   var io = require('socket.io'),

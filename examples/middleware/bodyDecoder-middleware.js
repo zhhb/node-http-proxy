@@ -42,7 +42,7 @@ http.createServer(new Store().handler()).listen(7531, function () {
     //don't worry about incoming contont type
     //bodyParser.parse[''] = JSON.parse
 
-    require('../../lib/node-http-proxy').createServer(
+    require('../../').createServer(
       //refactor the body parser and re-streamer into a separate package
       bodyParser(),
       //body parser absorbs the data and end events before passing control to the next
