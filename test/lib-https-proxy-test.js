@@ -1,4 +1,5 @@
 var httpProxy = require('../lib/http-proxy'),
+    semver    = require('semver'),
     expect    = require('expect.js'),
     http      = require('http')
     https     = require('https'),
@@ -35,6 +36,7 @@ describe('lib/http-proxy.js', function() {
           ssl: {
             key: fs.readFileSync(path.join(__dirname, 'fixtures', 'agent2-key.pem')),
             cert: fs.readFileSync(path.join(__dirname, 'fixtures', 'agent2-cert.pem')),
+            ciphers: 'AES128-GCM-SHA256',
           }
         }).listen(ports.proxy);
 
@@ -65,6 +67,7 @@ describe('lib/http-proxy.js', function() {
         var source = https.createServer({
           key: fs.readFileSync(path.join(__dirname, 'fixtures', 'agent2-key.pem')),
           cert: fs.readFileSync(path.join(__dirname, 'fixtures', 'agent2-cert.pem')),
+          ciphers: 'AES128-GCM-SHA256',
         }, function (req, res) {
           expect(req.method).to.eql('GET');
           expect(req.headers.host.split(':')[1]).to.eql(ports.proxy);
@@ -105,6 +108,7 @@ describe('lib/http-proxy.js', function() {
         var source = https.createServer({
           key: fs.readFileSync(path.join(__dirname, 'fixtures', 'agent2-key.pem')),
           cert: fs.readFileSync(path.join(__dirname, 'fixtures', 'agent2-cert.pem')),
+          ciphers: 'AES128-GCM-SHA256',
         }, function(req, res) {
           expect(req.method).to.eql('GET');
           expect(req.headers.host.split(':')[1]).to.eql(ports.proxy);
@@ -119,6 +123,7 @@ describe('lib/http-proxy.js', function() {
           ssl: {
             key: fs.readFileSync(path.join(__dirname, 'fixtures', 'agent2-key.pem')),
             cert: fs.readFileSync(path.join(__dirname, 'fixtures', 'agent2-cert.pem')),
+            ciphers: 'AES128-GCM-SHA256',
           },
           secure: false
         }).listen(ports.proxy);
@@ -150,6 +155,7 @@ describe('lib/http-proxy.js', function() {
         var source = https.createServer({
           key: fs.readFileSync(path.join(__dirname, 'fixtures', 'agent2-key.pem')),
           cert: fs.readFileSync(path.join(__dirname, 'fixtures', 'agent2-cert.pem')),
+          ciphers: 'AES128-GCM-SHA256',
         }).listen(ports.source);
 
         var proxy = httpProxy.createProxyServer({
@@ -161,7 +167,11 @@ describe('lib/http-proxy.js', function() {
 
         proxy.on('error', function (err, req, res) {
           expect(err).to.be.an(Error);
-          expect(err.toString()).to.be('Error: DEPTH_ZERO_SELF_SIGNED_CERT')
+          if (semver.gt(process.versions.node, '0.12.0')) {
+            expect(err.toString()).to.be('Error: self signed certificate')
+          } else {
+            expect(err.toString()).to.be('Error: DEPTH_ZERO_SELF_SIGNED_CERT')
+          }
           done();
         })
 
@@ -191,6 +201,7 @@ describe('lib/http-proxy.js', function() {
         var ownServer = https.createServer({
           key: fs.readFileSync(path.join(__dirname, 'fixtures', 'agent2-key.pem')),
           cert: fs.readFileSync(path.join(__dirname, 'fixtures', 'agent2-cert.pem')),
+          ciphers: 'AES128-GCM-SHA256',
         }, function (req, res) {
           proxy.web(req, res, {
             target: 'http://127.0.0.1:' + ports.source

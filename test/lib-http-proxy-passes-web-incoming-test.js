@@ -5,14 +5,35 @@ var webPasses = require('../lib/http-proxy/passes/web-incoming'),
 
 describe('lib/http-proxy/passes/web.js', function() {
   describe('#deleteLength', function() {
-    it('should change `content-length`', function() {
+    it('should change `content-length` for DELETE requests', function() {
       var stubRequest = {
         method: 'DELETE',
         headers: {}
       };
       webPasses.deleteLength(stubRequest, {}, {});
       expect(stubRequest.headers['content-length']).to.eql('0');
-    })
+    });
+
+    it('should change `content-length` for OPTIONS requests', function() {
+      var stubRequest = {
+        method: 'OPTIONS',
+        headers: {}
+      };
+      webPasses.deleteLength(stubRequest, {}, {});
+      expect(stubRequest.headers['content-length']).to.eql('0');
+    });
+
+    it('should remove `transfer-encoding` from empty DELETE requests', function() {
+      var stubRequest = {
+        method: 'DELETE',
+        headers: {
+          'transfer-encoding': 'chunked'
+        }
+      };
+      webPasses.deleteLength(stubRequest, {}, {});
+      expect(stubRequest.headers['content-length']).to.eql('0');
+      expect(stubRequest.headers).to.not.have.key('transfer-encoding');
+    });
   });
 
   describe('#timeout', function() {
@@ -208,7 +229,7 @@ describe('#createProxyServer.web() using own http server', function () {
 
     var started = new Date().getTime();
     function requestHandler(req, res) {
-      proxy.once('error', function (err, errReq, errRes) {
+      proxy.once('econnreset', function (err, errReq, errRes) {
         proxyServer.close();
         expect(err).to.be.an(Error);
         expect(errReq).to.be.equal(req);
@@ -263,5 +284,58 @@ describe('#createProxyServer.web() using own http server', function () {
     proxyServer.listen('8086');
     source.listen('8080');
     http.request('http://127.0.0.1:8086', function() {}).end();
+  });
+
+  it('should proxy the request and handle changeOrigin option', function (done) {
+    var proxy = httpProxy.createProxyServer({
+      target: 'http://127.0.0.1:8080',
+      changeOrigin: true
+    });
+
+    function requestHandler(req, res) {
+      proxy.web(req, res);
+    }
+
+    var proxyServer = http.createServer(requestHandler);
+
+    var source = http.createServer(function(req, res) {
+      source.close();
+      proxyServer.close();
+      expect(req.method).to.eql('GET');
+      expect(req.headers.host.split(':')[1]).to.eql('8080');
+      done();
+    });
+
+    proxyServer.listen('8081');
+    source.listen('8080');
+
+    http.request('http://127.0.0.1:8081', function() {}).end();
+  });
+
+  it('should proxy the request with the Authorization header set', function (done) {
+    var proxy = httpProxy.createProxyServer({
+      target: 'http://127.0.0.1:8080',
+      auth: 'user:pass'
+    });
+
+    function requestHandler(req, res) {
+      proxy.web(req, res);
+    }
+
+    var proxyServer = http.createServer(requestHandler);
+
+    var source = http.createServer(function(req, res) {
+      source.close();
+      proxyServer.close();
+      var auth = new Buffer(req.headers.authorization.split(' ')[1], 'base64');
+      expect(req.method).to.eql('GET');
+      expect(auth.toString()).to.eql('user:pass');
+      done();
+    });
+
+    proxyServer.listen('8081');
+    source.listen('8080');
+
+    http.request('http://127.0.0.1:8081', function() {}).end();
   });
 });

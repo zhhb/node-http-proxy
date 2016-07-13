@@ -3,6 +3,7 @@ var httpProxy = require('../lib/http-proxy'),
     http      = require('http'),
     ws        = require('ws')
     io        = require('socket.io'),
+    SSE       = require('sse'),
     ioClient  = require('socket.io-client');
 
 //
@@ -62,6 +63,41 @@ describe('lib/http-proxy.js', function() {
   });
 
   describe('#createProxyServer using the web-incoming passes', function () {
+    it('should proxy sse', function(done){
+      var ports = { source: gen.port, proxy: gen.port },
+      proxy = httpProxy.createProxyServer({
+        target: 'http://localhost:' + ports.source,
+      }),
+      proxyServer = proxy.listen(ports.proxy),
+      source = http.createServer(),
+      sse = new SSE(source, {path: '/'});
+
+      sse.on('connection', function(client) {
+        client.send('Hello over SSE');
+        client.close();
+      });
+
+      source.listen(ports.source);
+
+      var options = {
+        hostname: 'localhost',
+        port: ports.proxy,
+      };
+
+      var req = http.request(options, function(res) {
+        var streamData = '';
+        res.on('data', function (chunk) {
+          streamData += chunk.toString('utf8');
+        });
+        res.on('end', function (chunk) {
+          expect(streamData).to.equal(':ok\n\ndata: Hello over SSE\n\n');
+          source.close();
+          proxy.close();
+          done();
+        });
+      }).end();
+    });
+
     it('should make the request on pipe and finish it', function(done) {
       var ports = { source: gen.port, proxy: gen.port };
       var proxy = httpProxy.createProxyServer({
@@ -280,7 +316,7 @@ describe('lib/http-proxy.js', function() {
       client.on('open', function () {
         client.send('hello there');
       });
-      
+
       var count = 0;
       function maybe_done () {
         count += 1;
@@ -337,14 +373,15 @@ describe('lib/http-proxy.js', function() {
     });
 
     it('should proxy a socket.io stream', function (done) {
-      var ports = { source: gen.port, proxy: gen.port };
-      var proxy = httpProxy.createProxyServer({
+      var ports = { source: gen.port, proxy: gen.port },
+      proxy = httpProxy.createProxyServer({
         target: 'ws://127.0.0.1:' + ports.source,
         ws: true
-      });
-      proxyServer = proxy.listen(ports.proxy);
-      var server = http.createServer();
+      }),
+      proxyServer = proxy.listen(ports.proxy),
+      server = http.createServer(),
       destiny = io.listen(server);
+
       function startSocketIo() {
         var client = ioClient.connect('ws://127.0.0.1:' + ports.proxy);
 
@@ -369,5 +406,185 @@ describe('lib/http-proxy.js', function() {
         });
       })
     });
-  })
+
+
+    it('should emit open and close events when socket.io client connects and disconnects', function (done) {
+      var ports = { source: gen.port, proxy: gen.port };
+      var proxy = httpProxy.createProxyServer({
+        target: 'ws://127.0.0.1:' + ports.source,
+        ws: true
+      });
+      var proxyServer = proxy.listen(ports.proxy);
+      var server = http.createServer();
+      var destiny = io.listen(server);
+
+      function startSocketIo() {
+        var client = ioClient.connect('ws://127.0.0.1:' + ports.proxy, {rejectUnauthorized: null});
+        client.on('connect', function () {
+          client.disconnect();
+        });
+      }
+      var count = 0;
+
+      proxyServer.on('open', function() {
+        count += 1;
+
+      });
+
+      proxyServer.on('close', function() {
+        proxyServer.close();
+        server.close();
+        if (count == 1) { done(); }
+      });
+
+      server.listen(ports.source);
+      server.on('listening', startSocketIo);
+
+    });
+
+    it('should pass all set-cookie headers to client', function (done) {
+      var ports = { source: gen.port, proxy: gen.port };
+      var proxy = httpProxy.createProxyServer({
+        target: 'ws://127.0.0.1:' + ports.source,
+        ws: true
+      }),
+      proxyServer = proxy.listen(ports.proxy),
+      destiny = new ws.Server({ port: ports.source }, function () {
+        var key = new Buffer(Math.random().toString()).toString('base64');
+        
+        var requestOptions = {
+          port: ports.proxy,
+          host: '127.0.0.1',
+          headers: {
+            'Connection': 'Upgrade',
+            'Upgrade': 'websocket',
+            'Host': 'ws://127.0.0.1',
+            'Sec-WebSocket-Version': 13,
+            'Sec-WebSocket-Key': key
+          }
+        };
+
+        var req = http.request(requestOptions);
+        
+        req.on('upgrade', function (res, socket, upgradeHead) {
+          expect(res.headers['set-cookie'].length).to.be(2);
+          done();
+        });
+        
+        req.end();
+      });
+      
+      destiny.on('headers', function (headers) {
+        headers.push('Set-Cookie: test1=test1');
+        headers.push('Set-Cookie: test2=test2');
+      });
+    });
+
+    it('should detect a proxyReq event and modify headers', function (done) {
+      var ports = { source: gen.port, proxy: gen.port },
+          proxy,
+          proxyServer,
+          destiny;
+
+      proxy = httpProxy.createProxyServer({
+        target: 'ws://127.0.0.1:' + ports.source,
+        ws: true
+      });
+
+      proxy.on('proxyReqWs', function(proxyReq, req, socket, options, head) {
+        proxyReq.setHeader('X-Special-Proxy-Header', 'foobar');
+      });
+
+      proxyServer = proxy.listen(ports.proxy);
+
+      destiny = new ws.Server({ port: ports.source }, function () {
+        var client = new ws('ws://127.0.0.1:' + ports.proxy);
+
+        client.on('open', function () {
+          client.send('hello there');
+        });
+
+        client.on('message', function (msg) {
+          expect(msg).to.be('Hello over websockets');
+          client.close();
+          proxyServer.close();
+          destiny.close();
+          done();
+        });
+      });
+
+      destiny.on('connection', function (socket) {
+        expect(socket.upgradeReq.headers['x-special-proxy-header']).to.eql('foobar');
+
+        socket.on('message', function (msg) {
+          expect(msg).to.be('hello there');
+          socket.send('Hello over websockets');
+        });
+      });
+    });
+
+    it('should forward frames with single frame payload (including on node 4.x)', function (done) {
+      var payload = Array(65529).join('0');
+      var ports = { source: gen.port, proxy: gen.port };
+      var proxy = httpProxy.createProxyServer({
+        target: 'ws://127.0.0.1:' + ports.source,
+        ws: true
+      }),
+      proxyServer = proxy.listen(ports.proxy),
+      destiny = new ws.Server({ port: ports.source }, function () {
+        var client = new ws('ws://127.0.0.1:' + ports.proxy);
+
+        client.on('open', function () {
+          client.send(payload);
+        });
+
+        client.on('message', function (msg) {
+          expect(msg).to.be('Hello over websockets');
+          client.close();
+          proxyServer.close();
+          destiny.close();
+          done();
+        });
+      });
+
+      destiny.on('connection', function (socket) {
+        socket.on('message', function (msg) {
+          expect(msg).to.be(payload);
+          socket.send('Hello over websockets');
+        });
+      });
+    });
+    
+    it('should forward continuation frames with big payload (including on node 4.x)', function (done) {
+      var payload = Array(65530).join('0');
+      var ports = { source: gen.port, proxy: gen.port };
+      var proxy = httpProxy.createProxyServer({
+        target: 'ws://127.0.0.1:' + ports.source,
+        ws: true
+      }),
+      proxyServer = proxy.listen(ports.proxy),
+      destiny = new ws.Server({ port: ports.source }, function () {
+        var client = new ws('ws://127.0.0.1:' + ports.proxy);
+
+        client.on('open', function () {
+          client.send(payload);
+        });
+
+        client.on('message', function (msg) {
+          expect(msg).to.be('Hello over websockets');
+          client.close();
+          proxyServer.close();
+          destiny.close();
+          done();
+        });
+      });
+
+      destiny.on('connection', function (socket) {
+        socket.on('message', function (msg) {
+          expect(msg).to.be(payload);
+          socket.send('Hello over websockets');
+        });
+      });
+    });
+  });
 });

@@ -1,7 +1,7 @@
 /*
   gzip-middleware.js: Basic example of `connect-gzip` middleware in node-http-proxy
 
-  Copyright (c) Nodejitsu 2013
+  Copyright (c) 2013 - 2016 Charlie Robbins, Jarrett Cruger & the Contributors.
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -27,7 +27,7 @@
 var util = require('util'),
     colors = require('colors'),
     http = require('http'),
-    connect = require('connect')
+    connect = require('connect'),
     httpProxy = require('../../lib/http-proxy');
 
 //
